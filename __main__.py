@@ -1,8 +1,6 @@
 """A Kubernetes Python Pulumi program"""
 
-from curses import meta
-import pulumi
-from pulumi import ResourceOptions
+from pulumi import ResourceOptions, Config, Output
 import pulumi_kubernetes as kubernetes
 from pulumi_kubernetes.apps.v1 import Deployment, DeploymentSpecArgs
 from pulumi_kubernetes.meta.v1 import LabelSelectorArgs, ObjectMetaArgs
@@ -43,7 +41,18 @@ kubecostIngressSecret = Secret(
     "auth": "YWRtaW46JGFwcjEkZ2tJenJxU2ckMWx3RUpFN1lFcTlzR0FNN1VtR1djMAo="
   },
 )
-
+# Install the NGINX ingress controller to our cluster. The controller
+# consists of a Pod and a Service. Install it and configure the controller
+# to publish the load balancer IP address on each Ingress so that
+# applications can depend on the IP address of the load balancer if needed.
+ctrl = IngressController(
+  'kubecost',
+  controller=ControllerArgs(
+      publish_service=ControllerPublishServiceArgs(
+          enabled=True,
+      ),
+  ),
+)
 # Use a nginx ingress controller instead
 kubcostIngress = kubernetes.networking.v1.Ingress(
   "kubecost-ingress",
@@ -54,27 +63,39 @@ kubcostIngress = kubernetes.networking.v1.Ingress(
       "app": "kubecost",
     },
     annotations={
-        "nginx.ingress.kubernetes.io/rewrite-target": "/",
         "nginx.ingress.kubernetes.io/auth-type": "basic",
         "nginx.ingress.kubernetes.io/auth-secret": kubecostIngressSecret.id,
         "nginx.ingress.kubernetes.io/auth-realm": "Authentication Required - ok",
     },
   ),
-spec=kubernetes.networking.v1.IngressSpecArgs(
-          rules=[kubernetes.networking.v1.IngressRuleArgs(
-          http=kubernetes.networking.v1.HTTPIngressRuleValueArgs(
-              paths=[kubernetes.networking.v1.HTTPIngressPathArgs(
-                  backend=kubernetes.networking.v1.IngressBackendArgs(
-                      service=kubernetes.networking.v1.IngressServiceBackendArgs(
-                          name="kubecost-cost-analyzer",
-                          port=kubernetes.networking.v1.ServiceBackendPortArgs(
-                              number=9090,
-                          ),
-                      ),
-                  ),
-              )],
-          ),
-      )],
-  ),
+  spec={
+    'rules': [
+          {
+              # Replace this with your own domain!
+              'http': {
+                  'paths': [{
+                      'pathType': 'Prefix',
+                      'path': '/',
+                      'backend': {
+                          'service': {
+                              'name': "kubecost-cost-analyzer",
+                              'port': { 'number': 9090 },
+                          },
+                      },
+                  }],
+              },
+          },
+    ]
+  },
+# spec=kubernetes.networking.v1.IngressSpecArgs(
+#     default_backend=kubernetes.networking.v1.IngressBackendArgs(
+#       service=kubernetes.networking.v1.IngressServiceBackendArgs(
+#         name="kubecost-cost-analyzer",
+#         port=kubernetes.networking.v1.ServiceBackendPortArgs(
+#           number=9090,
+#         )
+#       )
+#     )
+#   ),
   opts=ResourceOptions(depends_on=[kubecost, kubecostIngressSecret])
 )
